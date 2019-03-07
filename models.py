@@ -7,6 +7,8 @@ Author:
 import layers
 import torch
 import torch.nn as nn
+import numpy as np
+from pytorch_pretrained_bert import BertTokenizer, BertForQuestionAnswering
 
 
 class BiDAF(nn.Module):
@@ -70,3 +72,26 @@ class BiDAF(nn.Module):
         out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
 
         return out
+
+
+SEP = '[SEP]'
+CLS = '[CLS]'
+
+class BERT_Base(nn.Module):
+    def __init__(self, id2word):
+        self.id2word = id2word
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.bert = BertForQuestionAnswering('bert-base-uncased')
+
+
+    def forward(self, cw_idxs, qw_idxs):
+        batch, context_size = cw_idxs.shape
+        _, question_size = qw_idxs
+        token_ids = np.zeros(batch, context_size + question_size + 3)  # +3 comes from +2 [SEP]'s and +1 [CLS]
+        for i in range(batch):
+            tokens = [CLS] + [self.id2word[j] for j in cw_idxs[i]] + [SEP] + [self.id2word[j] for j in qw_idxs[i]] + [SEP]
+            # segments_ids = [0] * (len(cw_idxs[i]) + 2) + [1] * (len(qw_idxs[i]) + 1)
+            token_ids[i, :len(tokens)] = self.tokenizer.convert_tokens_to_ids(tokens)
+        tokens_tensor = torch.tensor(token_ids)
+        #segments_tensors = torch.tensor([segments_ids])
+        return self.bert(tokens_tensor)  # What to do with segment ids????
