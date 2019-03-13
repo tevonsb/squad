@@ -96,30 +96,32 @@ class BERT_Base(nn.Module):
         #segments_tensors = torch.tensor([segments_ids])
         return self.bert(tokens_tensor)  # What to do with segment ids????
 
+#  Pass in 567 as the max_seq_length in run_squad.py
 BERT_OUT_SIZE = 768
-TOTAL_SEQ_LEN = 384 + 64  # Default sizes for paragraph and question used in run_squad.py
+QUESTION_LEN = 64
+CONTEXT_LEN = 500
+TOTAL_SEQ_LEN = QUESTION_LEN + CONTEXT_LEN + 3 # To account for 2*[SEP] and [CLS] tokens
 
 class Tevon(nn.Module):
-    def __init__(self, h1=4098, h2=2048, drop_prob=0.5):
+    def __init__(self, h1=4096, h2=2048, drop_prob=0.5):
         super(Tevon, self).__init__()
         self.bert = BertModel.from_pretrained('bert-base-cased')
         self.linear1 = nn.Linear(BERT_OUT_SIZE * TOTAL_SEQ_LEN, h1)
         self.drop1 = nn.Dropout(drop_prob)
         self.linear2 = nn.Linear(h1, h2)
-        self.drop1 = nn.Dropout(drop_prob)
-        self.linear3 = nn.Linear(h2, 2 * BERT_OUT_SIZE)
+        self.drop2 = nn.Dropout(drop_prob)
+        self.linear3 = nn.Linear(h2, 2 * CONTEXT_LEN)
 
     def forward(self, input_ids, segment_ids, mask):
-        bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)
-        x = torch.relu(self.linear1(bert_encodings.view(bert_encodings.size(0), -1)))  # View concatenates all encodings
+        bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)  # (batch, time, embedding_size)
+        x = torch.relu(self.linear1(bert_encodings.view(bert_encodings.size(0), -1)))  # View concatenates all encodings (batch, h1)
         x = self.drop1(x)
-        x = torch.relu(self.linear2(x))
+        x = torch.relu(self.linear2(x))  # (batch, h2)
         x = self.drop2(x)
-        logits = self.linear3(x)  # It is important not to apply ReLU here.
-        start_logits, end_logits= logits.split(BERT_OUT_SIZE, dim=-1)
+        x = self.linear3(x)  # It is important not to apply ReLU here. (batch, 2*embedding_size)
+        start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
+        bert_encodings = bert_encodings[:,:-CONTEXT_LEN, :]  # TODO: confirm if there is a [SEP] token at the end
+        start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1))
+        end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1))
         # May need to squeeze logits.
         return start_logits, end_logits
-
-
-
-
