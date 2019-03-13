@@ -8,7 +8,7 @@ import layers
 import torch
 import torch.nn as nn
 import numpy as np
-from pytorch_pretrained_bert import BertTokenizer, BertForQuestionAnswering
+from pytorch_pretrained_bert import BertTokenizer, BertModel
 
 
 class BiDAF(nn.Module):
@@ -95,3 +95,31 @@ class BERT_Base(nn.Module):
         tokens_tensor = torch.tensor(token_ids)
         #segments_tensors = torch.tensor([segments_ids])
         return self.bert(tokens_tensor)  # What to do with segment ids????
+
+BERT_OUT_SIZE = 768
+TOTAL_SEQ_LEN = 384 + 64  # Default sizes for paragraph and question used in run_squad.py
+
+class Tevon(nn.Module):
+    def __init__(self, h1=4098, h2=2048, drop_prob=0.5):
+        super(Tevon, self).__init__()
+        self.bert = BertModel.from_pretrained('bert-base-cased')
+        self.linear1 = nn.Linear(BERT_OUT_SIZE * TOTAL_SEQ_LEN, h1)
+        self.drop1 = nn.Dropout(drop_prob)
+        self.linear2 = nn.Linear(h1, h2)
+        self.drop1 = nn.Dropout(drop_prob)
+        self.linear3 = nn.Linear(h2, 2 * BERT_OUT_SIZE)
+
+    def forward(self, input_ids, segment_ids, mask):
+        bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)
+        x = torch.relu(self.linear1(bert_encodings.view(bert_encodings.size(0), -1)))  # View concatenates all encodings
+        x = self.drop1(x)
+        x = torch.relu(self.linear2(x))
+        x = self.drop2(x)
+        logits = self.linear3(x)  # It is important not to apply ReLU here.
+        start_logits, end_logits= logits.split(BERT_OUT_SIZE, dim=-1)
+        # May need to squeeze logits.
+        return start_logits, end_logits
+
+
+
+
