@@ -41,6 +41,8 @@ from pytorch_pretrained_bert.tokenization import (BasicTokenizer,
                                                   BertTokenizer,
                                                   whitespace_tokenize)
 
+from models import Tevon
+
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -894,9 +896,11 @@ def main():
             num_train_optimization_steps = num_train_optimization_steps // torch.distributed.get_world_size()
 
     # Prepare model
-    model = BertForQuestionAnswering.from_pretrained(args.bert_model,
-                                                     cache_dir=os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE),
-                                                                            'distributed_{}'.format(args.local_rank)))
+    # model = BertForQuestionAnswering.from_pretrained(args.bert_model,
+    #                                                  cache_dir=os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE),
+    #                                                                         'distributed_{}'.format(args.local_rank)))
+
+    model = Tevon()
 
     if args.fp16:
         model.half()
@@ -993,7 +997,10 @@ def main():
                     batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
                 input_ids, input_mask, segment_ids, start_positions, end_positions = batch
 
-                loss = model(input_ids, segment_ids, input_mask, start_positions, end_positions)
+                # TODO: Change loss to be outside of the model
+                start_logits, end_logits = model(input_ids, segment_ids, input_mask)
+                loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
+                # If we are on multi-GPU, split add a dimension
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
@@ -1026,6 +1033,8 @@ def main():
 
         # Load a trained model and config that you have fine-tuned
         config = BertConfig(output_config_file)
+
+        # Replace this model with Tevon
         model = BertForQuestionAnswering(config)
         model.load_state_dict(torch.load(output_model_file))
     else:
@@ -1086,6 +1095,21 @@ def main():
                           output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                           args.version_2_with_negative, args.null_score_diff_threshold)
 
+def compute_loss(start_logits, end_logits, start_positions, end_positions):
+    if len(start_positions.size()) > 1:
+        start_positions = start_positions.squeeze(-1)
+    if len(end_positions.size()) > 1:
+        end_positions = end_positions.squeeze(-1)
+    # sometimes the start/end positions are outside our model inputs, we ignore these terms
+    ignored_index = start_logits.size(1)
+    start_positions.clamp_(0, ignored_index)
+    end_positions.clamp_(0, ignored_index)
+
+    loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+    start_loss = loss_fct(start_logits, start_positions)
+    end_loss = loss_fct(end_logits, end_positions)
+    total_loss = (start_loss + end_loss) / 2
+    return total_loss
 
 if __name__ == "__main__":
     main()
