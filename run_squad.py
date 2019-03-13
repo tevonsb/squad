@@ -29,6 +29,7 @@ from io import open
 
 import numpy as np
 import torch
+from torch.nn import CrossEntropyLoss
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
@@ -901,6 +902,7 @@ def main():
     #                                                                         'distributed_{}'.format(args.local_rank)))
 
     model = Tevon()
+    loss_fct = CrossEntropyLoss(ignore_index=args.max_seq_length)
 
     if args.fp16:
         model.half()
@@ -997,9 +999,8 @@ def main():
                     batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
                 input_ids, input_mask, segment_ids, start_positions, end_positions = batch
 
-                # TODO: Change loss to be outside of the model
                 start_logits, end_logits = model(input_ids, segment_ids, input_mask)
-                loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
+                loss = compute_loss(start_logits, end_logits, start_positions, end_positions, loss_fct)
                 # If we are on multi-GPU, split add a dimension
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
@@ -1010,7 +1011,7 @@ def main():
                     optimizer.backward(loss)
                 else:
                     loss.backward()
-                if (step + 1) % args.gradient_accumulation_steps == 0:
+                if (step + 1) % args.gradient_accumulation_steps == 0:  # FLAG used to have artificially large batch sizes without overloading memory
                     if args.fp16:
                         # modify learning rate with special warm up BERT uses
                         # if args.fp16 is False, BertAdam is used and handles this automatically
@@ -1095,7 +1096,7 @@ def main():
                           output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                           args.version_2_with_negative, args.null_score_diff_threshold)
 
-def compute_loss(start_logits, end_logits, start_positions, end_positions):
+def compute_loss(start_logits, end_logits, start_positions, end_positions, loss_fct):
     if len(start_positions.size()) > 1:
         start_positions = start_positions.squeeze(-1)
     if len(end_positions.size()) > 1:
@@ -1105,7 +1106,6 @@ def compute_loss(start_logits, end_logits, start_positions, end_positions):
     start_positions.clamp_(0, ignored_index)
     end_positions.clamp_(0, ignored_index)
 
-    loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
     start_loss = loss_fct(start_logits, start_positions)
     end_loss = loss_fct(end_logits, end_positions)
     total_loss = (start_loss + end_loss) / 2
