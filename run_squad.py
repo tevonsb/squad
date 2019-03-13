@@ -1011,7 +1011,7 @@ def main():
                     optimizer.backward(loss)
                 else:
                     loss.backward()
-                if (step + 1) % args.gradient_accumulation_steps == 0:  # FLAG used to have artificially large batch sizes without overloading memory
+                if (step + 1) % args.gradient_accumulation_steps == 0:  # FLAG used to have artificially large batch sizes without overloading memory, this divides the batch size
                     if args.fp16:
                         # modify learning rate with special warm up BERT uses
                         # if args.fp16 is False, BertAdam is used and handles this automatically

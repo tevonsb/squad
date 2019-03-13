@@ -98,8 +98,8 @@ class BERT_Base(nn.Module):
 
 #  Pass in 567 as the max_seq_length in run_squad.py
 BERT_OUT_SIZE = 768
-QUESTION_LEN = 64
-CONTEXT_LEN = 500
+QUESTION_LEN = 60
+CONTEXT_LEN = 449
 TOTAL_SEQ_LEN = QUESTION_LEN + CONTEXT_LEN + 3 # To account for 2*[SEP] and [CLS] tokens
 
 class Tevon(nn.Module):
