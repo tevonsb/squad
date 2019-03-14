@@ -903,7 +903,7 @@ def main():
 
     model = Tevon()
     loss_fct = CrossEntropyLoss(ignore_index=args.max_seq_length).to(device)
-    loss_fct = torch.nn.Dataparallel(loss_fct)
+    loss_fct = torch.nn.DataParallel(loss_fct)
     if args.fp16:
         model.half()
     model.to(device)
