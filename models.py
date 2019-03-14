@@ -7,7 +7,7 @@ Author:
 import layers
 import torch
 import torch.nn as nn
-import numpy as np
+from torch.nn import CrossEntropyLoss
 from pytorch_pretrained_bert import BertTokenizer, BertModel
 
 
@@ -90,7 +90,7 @@ class Tevon(nn.Module):
         self.drop2 = nn.Dropout(drop_prob)
         self.linear3 = nn.Linear(h1*h2, 2 * BERT_OUT_SIZE)
 
-    def forward(self, input_ids, segment_ids, mask):
+    def forward(self, input_ids, segment_ids, mask, start_positions=None, end_positions=None):
         bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)  # (batch, time, embedding_size)
         x = torch.relu(self.compress_features(bert_encodings))  # First we compress the feature length to h1. output shape = (batch, T, h1)
         x = self.drop1(x)
@@ -102,5 +102,25 @@ class Tevon(nn.Module):
         bert_encodings = bert_encodings[:, -CONTEXT_LEN: -1, :]  # TODO: confirm if there is a [SEP] token at the end
         start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1)).squeeze(-1)
         end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1)).squeeze(-1)
-        # May need to squeeze logits.
+
+        # We compute the loss inside the forward pass in order to take full advantage of Multi-GPU training.
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+
+            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+            return total_loss
+        else:
+            return start_logits, end_logits
+
         return start_logits, end_logits

@@ -902,8 +902,7 @@ def main():
     #                                                                         'distributed_{}'.format(args.local_rank)))
 
     model = Tevon()
-    loss_fct = CrossEntropyLoss(ignore_index=args.max_seq_length).to(device)
-    loss_fct = torch.nn.DataParallel(loss_fct)
+
     if args.fp16:
         model.half()
     model.to(device)
@@ -999,9 +998,8 @@ def main():
                     batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
                 input_ids, input_mask, segment_ids, start_positions, end_positions = batch
 
-                start_logits, end_logits = model(input_ids, segment_ids, input_mask)
-                loss = compute_loss(start_logits, end_logits, start_positions, end_positions, loss_fct)
-                if step % 100:
+                loss = model(input_ids, segment_ids, input_mask, start_positions, end_positions)
+                if step % 1000:
                     print(loss)
                 # If we are on multi-GPU, split add a dimension
                 if n_gpu > 1:
@@ -1098,6 +1096,8 @@ def main():
                           output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                           args.version_2_with_negative, args.null_score_diff_threshold)
 
+
+# DEPRECATED
 def compute_loss(start_logits, end_logits, start_positions, end_positions, loss_fct):
     if len(start_positions.size()) > 1:
         start_positions = start_positions.squeeze(-1)
