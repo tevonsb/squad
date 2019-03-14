@@ -902,7 +902,7 @@ def main():
     #                                                                         'distributed_{}'.format(args.local_rank)))
 
     model = Tevon()
-    loss_fct = CrossEntropyLoss(ignore_index=args.max_seq_length)
+    loss_fct = CrossEntropyLoss(ignore_index=args.max_seq_length).to(device)
 
     if args.fp16:
         model.half()
