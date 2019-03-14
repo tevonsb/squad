@@ -1001,6 +1001,8 @@ def main():
 
                 start_logits, end_logits = model(input_ids, segment_ids, input_mask)
                 loss = compute_loss(start_logits, end_logits, start_positions, end_positions, loss_fct)
+                if step % 100:
+                    print(loss)
                 # If we are on multi-GPU, split add a dimension
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
