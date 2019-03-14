@@ -100,7 +100,7 @@ class Tevon(nn.Module):
         # It is important not to apply ReLU for the last layer.
         start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
         bert_encodings = bert_encodings[:, -CONTEXT_LEN: -1, :]  # TODO: confirm if there is a [SEP] token at the end
-        start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1))
-        end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1))
+        start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1)).squeeze(-1)
+        end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1)).squeeze(-1)
         # May need to squeeze logits.
         return start_logits, end_logits
