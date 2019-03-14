@@ -103,24 +103,25 @@ CONTEXT_LEN = 449
 TOTAL_SEQ_LEN = QUESTION_LEN + CONTEXT_LEN + 3 # To account for 2*[SEP] and [CLS] tokens
 
 class Tevon(nn.Module):
-    def __init__(self, h1=4096, h2=2048, drop_prob=0.5):
+    def __init__(self, h1=64, h2=64, drop_prob=0.2):
         super(Tevon, self).__init__()
         self.bert = BertModel.from_pretrained('bert-base-cased')
-        self.linear1 = nn.Linear(BERT_OUT_SIZE * TOTAL_SEQ_LEN, h1)
+        self.compress_features = nn.Linear(BERT_OUT_SIZE, h1)
         self.drop1 = nn.Dropout(drop_prob)
-        self.linear2 = nn.Linear(h1, h2)
+        self.compress_time = nn.Linear(TOTAL_SEQ_LEN, h2)
         self.drop2 = nn.Dropout(drop_prob)
-        self.linear3 = nn.Linear(h2, 2 * CONTEXT_LEN)
+        self.linear3 = nn.Linear(h1*h2, 2 * BERT_OUT_SIZE)
 
     def forward(self, input_ids, segment_ids, mask):
         bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)  # (batch, time, embedding_size)
-        x = torch.relu(self.linear1(bert_encodings.view(bert_encodings.size(0), -1)))  # View concatenates all encodings (batch, h1)
+        x = torch.relu(self.linear1(bert_encodings))  # First we compress the feature length to h1. output shape = (batch, T, h1)
         x = self.drop1(x)
-        x = torch.relu(self.linear2(x))  # (batch, h2)
+        x = torch.relu(self.linear2(x.permute(0, 2, 1)))  # We compress the time dimension. output shape = (batch, h1, h2)
         x = self.drop2(x)
-        x = self.linear3(x)  # It is important not to apply ReLU here. (batch, 2*embedding_size)
+        x = self.linear3(x.view(x.size(0), -1))  # We concatenate the last two dimensions. output shape = (batch, 2 * BERT_OUT_SIZE)
+        # It is important not to apply ReLU for the last layer.
         start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
-        bert_encodings = bert_encodings[:,:-CONTEXT_LEN, :]  # TODO: confirm if there is a [SEP] token at the end
+        bert_encodings = bert_encodings[:, -CONTEXT_LEN: -1, :]  # TODO: confirm if there is a [SEP] token at the end
         start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1))
         end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1))
         # May need to squeeze logits.
