@@ -74,29 +74,7 @@ class BiDAF(nn.Module):
         return out
 
 
-SEP = '[SEP]'
-CLS = '[CLS]'
-
-class BERT_Base(nn.Module):
-    def __init__(self, id2word):
-        self.id2word = id2word
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.bert = BertForQuestionAnswering('bert-base-uncased')
-
-
-    def forward(self, cw_idxs, qw_idxs):
-        batch, context_size = cw_idxs.shape
-        _, question_size = qw_idxs
-        token_ids = np.zeros(batch, context_size + question_size + 3)  # +3 comes from +2 [SEP]'s and +1 [CLS]
-        for i in range(batch):
-            tokens = [CLS] + [self.id2word[j] for j in cw_idxs[i]] + [SEP] + [self.id2word[j] for j in qw_idxs[i]] + [SEP]
-            # segments_ids = [0] * (len(cw_idxs[i]) + 2) + [1] * (len(qw_idxs[i]) + 1)
-            token_ids[i, :len(tokens)] = self.tokenizer.convert_tokens_to_ids(tokens)
-        tokens_tensor = torch.tensor(token_ids)
-        #segments_tensors = torch.tensor([segments_ids])
-        return self.bert(tokens_tensor)  # What to do with segment ids????
-
-#  Pass in 567 as the max_seq_length in run_squad.py
+#  Pass in 512 as the max_seq_length in run_squad.py
 BERT_OUT_SIZE = 768
 QUESTION_LEN = 60
 CONTEXT_LEN = 449
@@ -114,9 +92,9 @@ class Tevon(nn.Module):
 
     def forward(self, input_ids, segment_ids, mask):
         bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)  # (batch, time, embedding_size)
-        x = torch.relu(self.linear1(bert_encodings))  # First we compress the feature length to h1. output shape = (batch, T, h1)
+        x = torch.relu(self.compress_features(bert_encodings))  # First we compress the feature length to h1. output shape = (batch, T, h1)
         x = self.drop1(x)
-        x = torch.relu(self.linear2(x.permute(0, 2, 1)))  # We compress the time dimension. output shape = (batch, h1, h2)
+        x = torch.relu(self.compress_time(x.permute(0, 2, 1)))  # We compress the time dimension. output shape = (batch, h1, h2)
         x = self.drop2(x)
         x = self.linear3(x.view(x.size(0), -1))  # We concatenate the last two dimensions. output shape = (batch, 2 * BERT_OUT_SIZE)
         # It is important not to apply ReLU for the last layer.
