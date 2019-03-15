@@ -847,9 +847,6 @@ def main():
                         help="Model name when saving on output dir.")
     args = parser.parse_args()
 
-    summary_writer = SummaryWriter(args.output_dir + '/.logs')
-
-
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         n_gpu = torch.cuda.device_count()
@@ -890,7 +887,7 @@ def main():
         raise ValueError("Output directory () already exists and is not empty.")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    os.makedirs(args.output_dir + '/.logs')
+    summary_writer = SummaryWriter(args.output_dir + '/.logs')
 
     tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 
