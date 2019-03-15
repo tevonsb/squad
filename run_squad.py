@@ -890,6 +890,7 @@ def main():
         raise ValueError("Output directory () already exists and is not empty.")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+    os.makedirs(args.output_dir + '/.logs')
 
     tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 
