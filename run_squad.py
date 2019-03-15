@@ -34,6 +34,7 @@ from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
+from tensorboardX import SummaryWriter
 
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.modeling import BertForQuestionAnswering, BertConfig, WEIGHTS_NAME, CONFIG_NAME
@@ -841,7 +842,13 @@ def main():
     parser.add_argument('--null_score_diff_threshold',
                         type=float, default=0.0,
                         help="If null_score - best_non_null is greater than the threshold predict null.")
+    parser.add_argument('--model_name',
+                        type=str, default=None, required=True,
+                        help="Model name when saving on output dir.")
     args = parser.parse_args()
+
+    summary_writer = SummaryWriter(args.output_dir + '/.logs')
+
 
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -992,7 +999,7 @@ def main():
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
         model.train()
-        for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+        for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 if n_gpu == 1:
                     batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
@@ -1006,7 +1013,7 @@ def main():
                     loss = loss / args.gradient_accumulation_steps
 
                 if step % 1000:
-                    print(loss)
+                    summary_writer.add_scalar('loss', loss.item(), global_step=epoch * len(train_dataloader) + step)
 
                 if args.fp16:
                     optimizer.backward(loss)
@@ -1024,23 +1031,32 @@ def main():
                     optimizer.zero_grad()
                     global_step += 1
 
-    if args.do_train:
-        # Save a trained model and the associated configuration
-        model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-        output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-        torch.save(model_to_save.state_dict(), output_model_file)
-        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-        with open(output_config_file, 'w') as f:
-            f.write(model_to_save.config.to_json_string())
+            torch.save(model, os.path.join(args.output_dir, args.model_name + str(epoch)))
 
-        # Load a trained model and config that you have fine-tuned
-        config = BertConfig(output_config_file)
 
-        # Replace this model with Tevon
-        model = BertForQuestionAnswering(config)
-        model.load_state_dict(torch.load(output_model_file))
-    else:
-        model = BertForQuestionAnswering.from_pretrained(args.bert_model)
+        # FLAG: code from original run_squad
+        # if args.do_train:
+        #
+        #     # # Save a trained model and the associated configuration
+        #     # model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+        #     # output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
+        #     # torch.save(model_to_save.state_dict(), output_model_file)
+        #     # output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+        #     # with open(output_config_file, 'w') as f:
+        #     #     f.write(model_to_save.config.to_json_string())
+        #     #
+        #     # # Load a trained model and config that you have fine-tuned
+        #     # config = BertConfig(output_config_file)
+        #     #
+        #     # # Replace this model with Tevon
+        #     # model = BertForQuestionAnswering(config)
+        #     # model.load_state_dict(torch.load(output_model_file))
+        #
+        #
+        # FLAG: our code
+        #     # torch.save(model, os.path.join(args.output_dir, args.model_name))
+        # else:
+        #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
 
     model.to(device)
 
