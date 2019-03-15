@@ -1061,7 +1061,8 @@ def main():
         # else:
         #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
 
-    model.to(device)
+    with torch.cuda.device(0):
+        model.to(device)
 
     if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         eval_examples = read_squad_examples(
