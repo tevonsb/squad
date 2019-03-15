@@ -772,10 +772,8 @@ def main():
     parser = argparse.ArgumentParser()
 
     ## Required parameters
-    parser.add_argument("--bert_model", default=None, type=str, required=True,
-                        help="Bert pre-trained model selected in the list: bert-base-uncased, "
-                             "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
-                             "bert-base-multilingual-cased, bert-base-chinese.")
+    parser.add_argument("--model_path", default=None, type=str,
+                        help="Path to model file for loading.")
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model checkpoints and predictions will be written.")
 
@@ -906,7 +904,10 @@ def main():
     #                                                  cache_dir=os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE),
     #                                                                         'distributed_{}'.format(args.local_rank)))
 
-    model = Tevon()
+    if args.model_path:
+        model = torch.load(args.model_path)
+    else:
+        model = Tevon()
 
     if args.fp16:
         model.half()
