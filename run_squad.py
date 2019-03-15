@@ -1060,9 +1060,9 @@ def main():
         #     # torch.save(model, os.path.join(args.output_dir, args.model_name))
         # else:
         #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
-
-    with torch.cuda.device(0):
-        model.to(device)
+    # device = "cuda:0"
+    model = model.module
+    model.to(device)
 
     if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         eval_examples = read_squad_examples(
@@ -1095,16 +1095,9 @@ def main():
         for input_ids, input_mask, segment_ids, example_indices in tqdm(eval_dataloader, desc="Evaluating"):
             if len(all_results) % 1000 == 0:
                 logger.info("Processing example: %d" % (len(all_results)))
-
-            with torch.cuda.device(0):
-                input_ids = input_ids.cuda()
-                input_mask = input_mask.cuda()
-                segment_ids = segment_ids.cuda()
-
-            # input_ids = input_ids.to(device)
-            # input_mask = input_mask.to(device)
-            # segment_ids = segment_ids.to(device)
-
+            input_ids = input_ids.to(device)
+            input_mask = input_mask.to(device)
+            segment_ids = segment_ids.to(device)
             with torch.no_grad():
                 batch_start_logits, batch_end_logits = model(input_ids, segment_ids, input_mask)
             for i, example_index in enumerate(example_indices):
@@ -1124,22 +1117,6 @@ def main():
                           output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                           args.version_2_with_negative, args.null_score_diff_threshold)
 
-
-# DEPRECATED
-def compute_loss(start_logits, end_logits, start_positions, end_positions, loss_fct):
-    if len(start_positions.size()) > 1:
-        start_positions = start_positions.squeeze(-1)
-    if len(end_positions.size()) > 1:
-        end_positions = end_positions.squeeze(-1)
-    # sometimes the start/end positions are outside our model inputs, we ignore these terms
-    ignored_index = start_logits.size(1)
-    start_positions.clamp_(0, ignored_index)
-    end_positions.clamp_(0, ignored_index)
-
-    start_loss = loss_fct(start_logits, start_positions)
-    end_loss = loss_fct(end_logits, end_positions)
-    total_loss = (start_loss + end_loss) / 2
-    return total_loss
 
 if __name__ == "__main__":
     main()
