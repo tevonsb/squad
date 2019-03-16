@@ -788,8 +788,9 @@ def main():
                         help="The output directory where the model checkpoints and predictions will be written.")
 
     ## Other parameters
-    parser.add_argument("--train_file", default=None, type=str, help="SQuAD json for training. E.g., train-v1.1.json")
-    parser.add_argument("--dev_file", default=None, type=str, help="SQuAD json for dev.")
+    parser.add_argument("--train_file", default='data/train-v2.0.json', type=str, help="SQuAD json for training. E.g., train-v1.1.json")
+    parser.add_argument("--dev_file", default='data/dev-v2.0.json', type=str, help="SQuAD json for dev.")
+    parser.add_argument("--dev_golden_file", default='data/dev_eval.json', type=str, help="SQuAD eval file for dev set.")
     parser.add_argument("--predict_file", default=None, type=str,
                         help="SQuAD json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
     parser.add_argument("--max_seq_length", default=384, type=int,
@@ -1037,7 +1038,7 @@ def main():
 
         # TRAINING LOOP
         model.train()
-        global_step_2 = 1
+        global_step_2 = 0
         for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 if n_gpu == 1:
