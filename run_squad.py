@@ -1075,7 +1075,7 @@ def main():
                     global_step += 1
 
                 # RUNNING VALIDATION
-                if global_step_2 % 5000:
+                if global_step_2 % 5000 == 0:
                     all_results = eval(model, device, eval_features, eval_dataloader)
                     all_preds = write_predictions(eval_examples, eval_features, all_results,
                                                   args.n_best_size, args.max_answer_length,
@@ -1095,7 +1095,7 @@ def main():
                         results_list.append(('AvNA', results['AvNA']))
                     results = OrderedDict(results_list)
                     for k, v in results.items():
-                        summary_writer.add_scalar('dev/{}'.format(k), v, step)
+                        summary_writer.add_scalar('dev/{}'.format(k), v, global_step_2)
 
                 global_step_2 += 1
 
