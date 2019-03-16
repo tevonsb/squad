@@ -857,7 +857,8 @@ def main():
                         help="Model name when saving on output dir.")
     args = parser.parse_args()
 
-    golden_file_dict = json.loads(args.dev_golden_file)
+    with open(args.dev_golden_file, "r", encoding='utf-8') as f:
+        golden_file_dict = json.load(f)
     uuid_to_id = { d['uuid']: _id for _id, d in golden_file_dict.items() }
 
     if args.local_rank == -1 or args.no_cuda:
