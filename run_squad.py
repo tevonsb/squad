@@ -857,6 +857,9 @@ def main():
                         help="Model name when saving on output dir.")
     args = parser.parse_args()
 
+    golden_file_dict = json.loads(args.dev_golden_file)
+    uuid_to_id = { d['uuid']: _id for _id, d in golden_file_dict.items() }
+
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         n_gpu = torch.cuda.device_count()
@@ -1080,8 +1083,11 @@ def main():
                                                   None, None, args.verbose_logging,
                                                   args.version_2_with_negative, args.null_score_diff_threshold,
                                                   write=False)
+                    all_preds = { uuid_to_id[uuid]: answer for uuid, answer in all_preds.items()}
+
                     with open(args.dev_golden_file, 'r') as f:
                         golden_dict = json_load(f)
+
                     results = util.eval_dicts(golden_dict, all_preds, args.version_2_with_negative)
                     results_list = [('F1', results['F1']),
                                     ('EM', results['EM'])]
