@@ -131,7 +131,7 @@ class Tevon(nn.Module):
 
 class TevonCNN(nn.Module):
     def __init__(self, h1=512, h2=256, h3=128, drop_prob=0.2):
-        super(Tevon, self).__init__()
+        super(TevonCNN, self).__init__()
         self.bert = BertModel.from_pretrained('bert-base-cased')
         # PERMUTE HERE
         # These params scale down time dim by a factor of 2
