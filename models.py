@@ -127,3 +127,62 @@ class Tevon(nn.Module):
             return total_loss
         else:
             return start_logits, end_logits
+
+
+class TevonCNN(nn.Module):
+    def __init__(self, h1=512, h2=256, h3=128, drop_prob=0.2):
+        super(Tevon, self).__init__()
+        self.bert = BertModel.from_pretrained('bert-base-cased')
+        # PERMUTE HERE
+        # These params scale down time dim by a factor of 2
+        self.conv1 = nn.Conv1d(BERT_OUT_SIZE, h1, kernel_size=6, stride=2, padding=2)
+        self.drop = nn.Dropout(drop_prob)
+        self.norm1 = nn.LayerNorm(TOTAL_SEQ_LEN / 2)
+        self.conv2 = nn.Conv1d(h1, h2, kernel_size=6, stride=2, padding=2)
+        self.norm2 = nn.LayerNorm(TOTAL_SEQ_LEN / 4)
+        self.conv3 = nn.Conv1d(h2, h3, kernel_size=6, stride=2, padding=2)
+        self.norm3 = nn.LayerNorm(TOTAL_SEQ_LEN / 8)
+        # CONCAT HERE
+        self.linear = nn.Linear(h3 * TOTAL_SEQ_LEN / 8, 2 * BERT_OUT_SIZE)
+        self.norm4 = nn.LayerNorm(BERT_OUT_SIZE)
+
+    def forward(self, input_ids, segment_ids, mask, start_positions=None, end_positions=None):
+        # bert_encodings.shape = (batch, time, embedding_size)
+        bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)
+        x = bert_encodings.permute(0, 2, 1)  # We permute in order for channels dim to match embedding dim.
+        # x.shape = (batch, embedding_size, time)
+        x = torch.relu(self.conv1(x))  # out shape = (batch, time / 2, h1)
+        x = self.drop(x)
+        x = self.norm1(x)
+        x = torch.relu(self.conv2(x)) # out shape = (batch, time / 4, h2)
+        x = self.drop(x)
+        x = self.norm2(x)
+        x = torch.relu(self.conv3(x)) # out shape = (batch, time / 8, h3)
+        x = self.drop(x)
+        x = self.norm3(x)
+        x = self.linear(x.view(x.size(0), -1))  # We concatenate the last two dimensions. out shape = (batch, 2 * BERT_OUT_SIZE)
+        start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
+        start = self.norm4(start)
+        end = self.norm4(end)
+        start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1)).squeeze(-1)
+        end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1)).squeeze(-1)
+
+        # We compute the loss inside the forward pass in order to take full advantage of Multi-GPU training.
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            # sometimes the start/end positions are outside our model inputs, we ignore these terms
+            ignored_index = start_logits.size(1)
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+
+            loss_fct = CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+            return total_loss
+        else:
+            return start_logits, end_logits
