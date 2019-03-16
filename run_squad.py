@@ -47,7 +47,7 @@ from pytorch_pretrained_bert.tokenization import (BasicTokenizer,
                                                   BertTokenizer,
                                                   whitespace_tokenize)
 
-from models import Tevon
+from models import Tevon, TevonCNN
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -855,6 +855,9 @@ def main():
     parser.add_argument('--model_name',
                         type=str, default=None, required=True,
                         help="Model name when saving on output dir.")
+    parser.add_argument('--model',
+                        type=str, default=None, required=True,
+                        help="Model to use.")
     args = parser.parse_args()
 
     with open(args.dev_golden_file, "r", encoding='utf-8') as f:
@@ -921,9 +924,17 @@ def main():
     #                                                                         'distributed_{}'.format(args.local_rank)))
 
     if args.model_path:
+        logger.info("Using --model_path; ignoring --model")
         model = torch.load(args.model_path)
-    else:
+    elif args.model == 'tevon':
+        logger.info("Using Tevon.")
         model = Tevon()
+    elif args.model == 'tevon_cnn':
+        logger.info("Using TevonCNN.")
+        model = TevonCNN()
+    else:
+        logger.info('Please specify an implemented model or call Tevon at (707) 494-5368.')
+        raise NotImplementedError
 
     if args.fp16:
         model.half()
