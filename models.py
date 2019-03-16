@@ -89,6 +89,7 @@ class Tevon(nn.Module):
         self.compress_time = nn.Linear(TOTAL_SEQ_LEN, h2)
         self.drop2 = nn.Dropout(drop_prob)
         self.linear3 = nn.Linear(h1*h2, 2 * BERT_OUT_SIZE)
+        self.norm = nn.LayerNorm(BERT_OUT_SIZE)
 
     def forward(self, input_ids, segment_ids, mask, start_positions=None, end_positions=None):
         bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)  # (batch, time, embedding_size)
@@ -97,9 +98,10 @@ class Tevon(nn.Module):
         x = torch.relu(self.compress_time(x.permute(0, 2, 1)))  # We compress the time dimension. output shape = (batch, h1, h2)
         x = self.drop2(x)
         x = self.linear3(x.view(x.size(0), -1))  # We concatenate the last two dimensions. output shape = (batch, 2 * BERT_OUT_SIZE)
-        # It is important not to apply ReLU for the last layer.
         start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
-        bert_encodings = bert_encodings[:, -CONTEXT_LEN: -1, :]  # TODO: confirm if there is a [SEP] token at the end
+        start = self.norm(start)
+        end = self.norm(end)
+        bert_encodings = self.norm(bert_encodings[:, -CONTEXT_LEN: -1, :])
         start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1)).squeeze(-1)
         end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1)).squeeze(-1)
 

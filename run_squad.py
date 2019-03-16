@@ -1060,8 +1060,8 @@ def main():
         #     # torch.save(model, os.path.join(args.output_dir, args.model_name))
         # else:
         #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
-    # device = "cuda:0"
-    model = model.module
+
+    model = model.module  # This essentially unwraps Tevon from DataParallel.
     model.to(device)
 
     if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
