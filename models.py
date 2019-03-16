@@ -137,13 +137,13 @@ class TevonCNN(nn.Module):
         # These params scale down time dim by a factor of 2
         self.conv1 = nn.Conv1d(BERT_OUT_SIZE, h1, kernel_size=6, stride=2, padding=2)
         self.drop = nn.Dropout(drop_prob)
-        self.norm1 = nn.LayerNorm(TOTAL_SEQ_LEN / 2)
+        self.norm1 = nn.LayerNorm(TOTAL_SEQ_LEN // 2)
         self.conv2 = nn.Conv1d(h1, h2, kernel_size=6, stride=2, padding=2)
-        self.norm2 = nn.LayerNorm(TOTAL_SEQ_LEN / 4)
+        self.norm2 = nn.LayerNorm(TOTAL_SEQ_LEN // 4)
         self.conv3 = nn.Conv1d(h2, h3, kernel_size=6, stride=2, padding=2)
-        self.norm3 = nn.LayerNorm(TOTAL_SEQ_LEN / 8)
+        self.norm3 = nn.LayerNorm(TOTAL_SEQ_LEN // 8)
         # CONCAT HERE
-        self.linear = nn.Linear(h3 * TOTAL_SEQ_LEN / 8, 2 * BERT_OUT_SIZE)
+        self.linear = nn.Linear(h3 * TOTAL_SEQ_LEN // 8, 2 * BERT_OUT_SIZE)
         self.norm4 = nn.LayerNorm(BERT_OUT_SIZE)
 
     def forward(self, input_ids, segment_ids, mask, start_positions=None, end_positions=None):
