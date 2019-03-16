@@ -81,27 +81,30 @@ CONTEXT_LEN = 449
 TOTAL_SEQ_LEN = QUESTION_LEN + CONTEXT_LEN + 3 # To account for 2*[SEP] and [CLS] tokens
 
 class Tevon(nn.Module):
-    def __init__(self, h1=64, h2=64, drop_prob=0.2):
+    def __init__(self, h1=128, h2=128, drop_prob=0.2):
         super(Tevon, self).__init__()
         self.bert = BertModel.from_pretrained('bert-base-cased')
         self.compress_features = nn.Linear(BERT_OUT_SIZE, h1)
         self.drop1 = nn.Dropout(drop_prob)
+        self.norm1 = nn.LayerNorm(h1)
         self.compress_time = nn.Linear(TOTAL_SEQ_LEN, h2)
         self.drop2 = nn.Dropout(drop_prob)
+        self.norm2 = nn.LayerNorm(h2)
         self.linear3 = nn.Linear(h1*h2, 2 * BERT_OUT_SIZE)
-        self.norm = nn.LayerNorm(BERT_OUT_SIZE)
+        self.norm3 = nn.LayerNorm(BERT_OUT_SIZE)
 
     def forward(self, input_ids, segment_ids, mask, start_positions=None, end_positions=None):
         bert_encodings, _ = self.bert(input_ids, segment_ids, mask, output_all_encoded_layers=False)  # (batch, time, embedding_size)
         x = torch.relu(self.compress_features(bert_encodings))  # First we compress the feature length to h1. output shape = (batch, T, h1)
         x = self.drop1(x)
+        x = self.norm1(x)
         x = torch.relu(self.compress_time(x.permute(0, 2, 1)))  # We compress the time dimension. output shape = (batch, h1, h2)
         x = self.drop2(x)
+        x = self.norm2(x)
         x = self.linear3(x.view(x.size(0), -1))  # We concatenate the last two dimensions. output shape = (batch, 2 * BERT_OUT_SIZE)
         start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
-        start = self.norm(start)
-        end = self.norm(end)
-        bert_encodings = self.norm(bert_encodings[:, -CONTEXT_LEN: -1, :])
+        start = self.norm3(start)
+        end = self.norm3(end)
         start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1)).squeeze(-1)
         end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1)).squeeze(-1)
 
@@ -124,3 +127,5 @@ class Tevon(nn.Module):
             return total_loss
         else:
             return start_logits, end_logits
+
+
