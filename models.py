@@ -127,5 +127,3 @@ class Tevon(nn.Module):
             return total_loss
         else:
             return start_logits, end_logits
-
-

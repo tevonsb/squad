@@ -26,7 +26,11 @@ import os
 import random
 import sys
 from io import open
+from collections import OrderedDict
 
+from ujson import load as json_load
+
+import util
 import numpy as np
 import torch
 from torch.nn import CrossEntropyLoss
@@ -448,10 +452,8 @@ RawResult = collections.namedtuple("RawResult",
 def write_predictions(all_examples, all_features, all_results, n_best_size,
                       max_answer_length, do_lower_case, output_prediction_file,
                       output_nbest_file, output_null_log_odds_file, verbose_logging,
-                      version_2_with_negative, null_score_diff_threshold):
+                      version_2_with_negative, null_score_diff_threshold, write=True):
     """Write final predictions to the json file and log-odds of null if needed."""
-    logger.info("Writing predictions to: %s" % (output_prediction_file))
-    logger.info("Writing nbest to: %s" % (output_nbest_file))
 
     example_index_to_features = collections.defaultdict(list)
     for feature in all_features:
@@ -625,16 +627,20 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
             else:
                 all_predictions[example.qas_id] = best_non_null_entry.text
                 all_nbest_json[example.qas_id] = nbest_json
+    if write:
+        logger.info("Writing predictions to: %s" % (output_prediction_file))
+        logger.info("Writing nbest to: %s" % (output_nbest_file))
+        with open(output_prediction_file, "w") as writer:
+            writer.write(json.dumps(all_predictions, indent=4) + "\n")
 
-    with open(output_prediction_file, "w") as writer:
-        writer.write(json.dumps(all_predictions, indent=4) + "\n")
+        with open(output_nbest_file, "w") as writer:
+            writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
 
-    with open(output_nbest_file, "w") as writer:
-        writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
-
-    if version_2_with_negative:
-        with open(output_null_log_odds_file, "w") as writer:
-            writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
+        if version_2_with_negative:
+            with open(output_null_log_odds_file, "w") as writer:
+                writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
+    else:
+        return all_predictions
 
 
 def get_final_text(pred_text, orig_text, do_lower_case, verbose_logging=False):
@@ -783,6 +789,7 @@ def main():
 
     ## Other parameters
     parser.add_argument("--train_file", default=None, type=str, help="SQuAD json for training. E.g., train-v1.1.json")
+    parser.add_argument("--dev_file", default=None, type=str, help="SQuAD json for dev.")
     parser.add_argument("--predict_file", default=None, type=str,
                         help="SQuAD json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
     parser.add_argument("--max_seq_length", default=384, type=int,
@@ -964,6 +971,8 @@ def main():
 
     global_step = 0
     if args.do_train:
+
+        # LOADING TRAIN DATA
         cached_train_features_file = args.train_file + '_{0}_{1}_{2}_{3}'.format(
             list(filter(None, args.bert_model.split('/'))).pop(), str(args.max_seq_length), str(args.doc_stride),
             str(args.max_query_length))
@@ -1001,7 +1010,34 @@ def main():
             train_sampler = DistributedSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
+        # LOADING DEV DATA
+        eval_examples = read_squad_examples(
+            input_file=args.predict_file, is_training=False, version_2_with_negative=args.version_2_with_negative)
+        eval_features = convert_examples_to_features(
+            examples=eval_examples,
+            tokenizer=tokenizer,
+            max_seq_length=args.max_seq_length,
+            doc_stride=args.doc_stride,
+            max_query_length=args.max_query_length,
+            is_training=False)
+
+        logger.info("***** Running predictions *****")
+        logger.info("  Num orig examples = %d", len(eval_examples))
+        logger.info("  Num split examples = %d", len(eval_features))
+        logger.info("  Batch size = %d", args.predict_batch_size)
+
+        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+        # Run prediction for full data
+        eval_sampler = SequentialSampler(eval_data)
+        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.predict_batch_size)
+
+        # TRAINING LOOP
         model.train()
+        global_step_2 = 1
         for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 if n_gpu == 1:
@@ -1016,7 +1052,7 @@ def main():
                     loss = loss / args.gradient_accumulation_steps
 
                 if step % 1000:
-                    summary_writer.add_scalar('loss', loss.item(), global_step=epoch * len(train_dataloader) + step)
+                    summary_writer.add_scalar('loss', loss.item(), global_step=global_step_2)
 
                 if args.fp16:
                     optimizer.backward(loss)
@@ -1034,32 +1070,30 @@ def main():
                     optimizer.zero_grad()
                     global_step += 1
 
+                # RUNNING VALIDATION
+                if global_step_2 % 5000:
+                    all_results = eval(model, device, eval_features, eval_dataloader)
+                    all_preds = write_predictions(eval_examples, eval_features, all_results,
+                                                  args.n_best_size, args.max_answer_length,
+                                                  args.do_lower_case, None,
+                                                  None, None, args.verbose_logging,
+                                                  args.version_2_with_negative, args.null_score_diff_threshold,
+                                                  write=False)
+                    with open(args.dev_golden_file, 'r') as f:
+                        golden_dict = json_load(f)
+                    results = util.eval_dicts(golden_dict, all_preds, args.version_2_with_negative)
+                    results_list = [('F1', results['F1']),
+                                    ('EM', results['EM'])]
+                    if args.version_2_with_negative:
+                        results_list.append(('AvNA', results['AvNA']))
+                    results = OrderedDict(results_list)
+                    for k, v in results.items():
+                        summary_writer.add_scalar('dev/{}'.format(k), v, step)
+
+                global_step_2 += 1
+
+            # SAVE MODEL AT END OF EACH EPOCH
             torch.save(model, os.path.join(args.output_dir, args.model_name + str(epoch)))
-
-
-        # FLAG: code from original run_squad
-        # if args.do_train:
-        #
-        #     # # Save a trained model and the associated configuration
-        #     # model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-        #     # output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-        #     # torch.save(model_to_save.state_dict(), output_model_file)
-        #     # output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-        #     # with open(output_config_file, 'w') as f:
-        #     #     f.write(model_to_save.config.to_json_string())
-        #     #
-        #     # # Load a trained model and config that you have fine-tuned
-        #     # config = BertConfig(output_config_file)
-        #     #
-        #     # # Replace this model with Tevon
-        #     # model = BertForQuestionAnswering(config)
-        #     # model.load_state_dict(torch.load(output_model_file))
-        #
-        #
-        # FLAG: our code
-        #     # torch.save(model, os.path.join(args.output_dir, args.model_name))
-        # else:
-        #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
 
     model = model.module  # This essentially unwraps Tevon from DataParallel.
     model.to(device)
@@ -1089,25 +1123,8 @@ def main():
         eval_sampler = SequentialSampler(eval_data)
         eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.predict_batch_size)
 
-        model.eval()
-        all_results = []
-        logger.info("Start evaluating")
-        for input_ids, input_mask, segment_ids, example_indices in tqdm(eval_dataloader, desc="Evaluating"):
-            if len(all_results) % 1000 == 0:
-                logger.info("Processing example: %d" % (len(all_results)))
-            input_ids = input_ids.to(device)
-            input_mask = input_mask.to(device)
-            segment_ids = segment_ids.to(device)
-            with torch.no_grad():
-                batch_start_logits, batch_end_logits = model(input_ids, segment_ids, input_mask)
-            for i, example_index in enumerate(example_indices):
-                start_logits = batch_start_logits[i].detach().cpu().tolist()
-                end_logits = batch_end_logits[i].detach().cpu().tolist()
-                eval_feature = eval_features[example_index.item()]
-                unique_id = int(eval_feature.unique_id)
-                all_results.append(RawResult(unique_id=unique_id,
-                                             start_logits=start_logits,
-                                             end_logits=end_logits))
+        all_results = eval(model, device, eval_features, eval_dataloader)
+
         output_prediction_file = os.path.join(args.output_dir, "predictions.json")
         output_nbest_file = os.path.join(args.output_dir, "nbest_predictions.json")
         output_null_log_odds_file = os.path.join(args.output_dir, "null_odds.json")
@@ -1116,6 +1133,30 @@ def main():
                           args.do_lower_case, output_prediction_file,
                           output_nbest_file, output_null_log_odds_file, args.verbose_logging,
                           args.version_2_with_negative, args.null_score_diff_threshold)
+
+
+def eval(model, device, eval_features, eval_dataloader):
+    model.eval()
+    all_results = []
+    logger.info("Start evaluating")
+    for input_ids, input_mask, segment_ids, example_indices in tqdm(eval_dataloader, desc="Evaluating"):
+        if len(all_results) % 1000 == 0:
+            logger.info("Processing example: %d" % (len(all_results)))
+        input_ids = input_ids.to(device)
+        input_mask = input_mask.to(device)
+        segment_ids = segment_ids.to(device)
+        with torch.no_grad():
+            batch_start_logits, batch_end_logits = model(input_ids, segment_ids, input_mask)
+        for i, example_index in enumerate(example_indices):
+            start_logits = batch_start_logits[i].detach().cpu().tolist()
+            end_logits = batch_end_logits[i].detach().cpu().tolist()
+            eval_feature = eval_features[example_index.item()]
+            unique_id = int(eval_feature.unique_id)
+            all_results.append(RawResult(unique_id=unique_id,
+                                         start_logits=start_logits,
+                                         end_logits=end_logits))
+
+    return all_results
 
 
 if __name__ == "__main__":
