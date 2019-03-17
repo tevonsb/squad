@@ -947,7 +947,7 @@ def main():
                 "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
 
         model = DDP(model)
-    elif n_gpu > 1:
+    elif n_gpu > 1 and not args.model_path:
         model = torch.nn.DataParallel(model)
 
     # Prepare optimizer
