@@ -134,17 +134,21 @@ class TevonCNN(nn.Module):
         super(TevonCNN, self).__init__()
         self.bert = BertModel.from_pretrained('bert-base-cased')
         # PERMUTE HERE
-        # These params scale down time dim by a factor of 2
+        # when padding = (kernel_size - 1) / 2 (stride=dilation=1), the time dimension remains constant
         self.conv1 = nn.Conv1d(BERT_OUT_SIZE, h1, kernel_size=6, stride=2, padding=2)
-        self.drop = nn.Dropout(drop_prob)
         self.norm1 = nn.LayerNorm(TOTAL_SEQ_LEN // 2)
         self.conv2 = nn.Conv1d(h1, h2, kernel_size=6, stride=2, padding=2)
         self.norm2 = nn.LayerNorm(TOTAL_SEQ_LEN // 4)
         self.conv3 = nn.Conv1d(h2, h3, kernel_size=6, stride=2, padding=2)
         self.norm3 = nn.LayerNorm(TOTAL_SEQ_LEN // 8)
-        # CONCAT HERE
-        self.linear = nn.Linear(h3 * TOTAL_SEQ_LEN // 8, 2 * BERT_OUT_SIZE)
-        self.norm4 = nn.LayerNorm(BERT_OUT_SIZE)
+        # REVERT PERMUTE
+        # UPSAMPLE TIME DIMS
+        # This choice of params keeps the embedding dim constant
+        self.convT1 = nn.ConvTranspose1d(TOTAL_SEQ_LEN // 8, TOTAL_SEQ_LEN // 2, kernel_size=5, padding=2)
+        self.norm4 = nn.LayerNorm(h3)
+        self.convT2 = nn.ConvTranspose1d(TOTAL_SEQ_LEN // 2, TOTAL_SEQ_LEN, kernel_size=5, padding=2)
+        self.norm5 = nn.LayerNorm(h3)
+        self.linear = nn.Linear(h3, 2)
 
     def forward(self, input_ids, segment_ids, mask, start_positions=None, end_positions=None):
         # bert_encodings.shape = (batch, time, embedding_size)
@@ -152,20 +156,21 @@ class TevonCNN(nn.Module):
         x = bert_encodings.permute(0, 2, 1)  # We permute in order for channels dim to match embedding dim.
         # x.shape = (batch, embedding_size, time)
         x = torch.relu(self.conv1(x))  # out shape = (batch, time / 2, h1)
-        x = self.drop(x)
         x = self.norm1(x)
         x = torch.relu(self.conv2(x)) # out shape = (batch, time / 4, h2)
-        x = self.drop(x)
         x = self.norm2(x)
         x = torch.relu(self.conv3(x)) # out shape = (batch, time / 8, h3)
-        x = self.drop(x)
         x = self.norm3(x)
-        x = self.linear(x.view(x.size(0), -1))  # We concatenate the last two dimensions. out shape = (batch, 2 * BERT_OUT_SIZE)
-        start, end = x.split(BERT_OUT_SIZE, dim=-1)  # (batch x embedding_size)
-        start = self.norm4(start)
-        end = self.norm4(end)
-        start_logits = torch.bmm(bert_encodings, start.unsqueeze(-1)).squeeze(-1)
-        end_logits = torch.bmm(bert_encodings, end.unsqueeze(-1)).squeeze(-1)
+        # UPSAMPLING TIME DIM
+        x = x.permute(0, 2, 1)
+        x = torch.relu(self.convT1(x))
+        x = self.norm4(x)
+        x = torch.relu(self.convT2(x))
+        x = self.norm5(x)
+        x = self.linear(x)  # We concatenate the last two dimensions. out shape = (batch, time, 2)
+        start_logits, end_logits = x.split(1, dim=-1)  # start and end shape = (batch, time)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
 
         # We compute the loss inside the forward pass in order to take full advantage of Multi-GPU training.
         if start_positions is not None and end_positions is not None:
